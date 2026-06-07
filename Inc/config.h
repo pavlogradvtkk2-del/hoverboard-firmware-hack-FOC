@@ -6,7 +6,7 @@
 
 // ############################### VARIANT SELECTION ###############################
 #if !defined(PLATFORMIO)
-  #define VARIANT_ADC         // Variant for control via ADC input
+  #define VARIANT_ADC
   //#define VARIANT_USART
   //#define VARIANT_NUNCHUK
   //#define VARIANT_PPM
@@ -52,20 +52,57 @@
 
 
 // ############################### BATTERY ###############################
+// УВАГА: акумулятор зношений, реальна напруга ~39В при "повному" заряді.
+// BAT_CALIB_REAL_VOLTAGE і BAT_CALIB_ADC — замінити після калібрування!
+// Поки що виставлено під 39В акум щоб не вимикався раніше часу.
+//
+// Як калібрувати:
+//   1. Увімкни DEBUG_SERIAL_USART3 в VARIANT_ADC нижче
+//   2. Підключи UART-USB адаптер до PB10 (TX правого роз'єму)
+//   3. Заряди акум до максимуму, зчитай BatADC і виміряй реальну напругу мультиметром
+//   4. Постав: BAT_CALIB_REAL_VOLTAGE = реальна_напруга * 100
+//              BAT_CALIB_ADC          = значення BatADC з монітора
+// =========================================================================
 #define BAT_FILT_COEF           655
-#define BAT_CALIB_REAL_VOLTAGE  3970      // !!! ЗАМІНИ після калібрування: реальна_напруга * 100
-#define BAT_CALIB_ADC           1492      // !!! ЗАМІНИ після калібрування: BatADC з debug виводу
+// =========================================================================
+// КАЛІБРОВКА БАТАРЕЇ — зношений акум, ~38В без навантаження
+// =========================================================================
+// BAT_CALIB_REAL_VOLTAGE = реальна напруга * 100  (виміряй мультиметром)
+// BAT_CALIB_ADC          = значення BatADC з debug виводу в той же момент
+//
+// Поточні значення виставлені приблизно під 38В акум.
+// Після підключення debug (розкоментуй DEBUG_SERIAL_USART3 в VARIANT_ADC)
+// — уточни обидва значення для точного відображення напруги.
+// =========================================================================
+#define BAT_CALIB_REAL_VOLTAGE  3800      // ~38.00В * 100
+#define BAT_CALIB_ADC           1415      // приблизне значення під 38В
 #define BAT_CELLS               10
+
+// =========================================================================
+// ПОРОГИ ЗАХИСТУ — знижені під зношений акум 38В без навантаження
+// =========================================================================
+// При зношеному акумі напруга під навантаженням просідає на 1-3В.
+// Якщо без навантаження 38В, то під навантаженням може бути 35-36В —
+// це вже близько до стандартного порогу DEAD (33.7В на 10S).
+//
+// Тому пороги суттєво знижено:
+//   BAT_LVL1 = 32.0В (пікання-попередження) — без навантаження ~35В
+//   BAT_DEAD = 30.0В (примусове вимкнення)  — без навантаження ~33В
+//
+// УВАГА: нижче 30В на 10S акум може отримати незворотні пошкодження.
+// Якщо акум сильно гріється або просідає до 28В — одразу зупинись.
+// =========================================================================
 #define BAT_LVL2_ENABLE         0
-#define BAT_LVL1_ENABLE         1
-#define BAT_DEAD_ENABLE         1
+#define BAT_LVL1_ENABLE         1         // пікання при слабкому акумі
+#define BAT_DEAD_ENABLE         1         // захист від повного розряду
 #define BAT_BLINK_INTERVAL      80
-#define BAT_LVL5  (390 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
-#define BAT_LVL4  (380 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
-#define BAT_LVL3  (370 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
-#define BAT_LVL2  (360 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
-#define BAT_LVL1  (350 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
-#define BAT_DEAD  (337 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
+
+#define BAT_LVL5  (380 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
+#define BAT_LVL4  (370 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
+#define BAT_LVL3  (355 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
+#define BAT_LVL2  (340 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE
+#define BAT_LVL1  (320 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE  // 32.0В — пікання
+#define BAT_DEAD  (300 * BAT_CELLS * BAT_CALIB_ADC) / BAT_CALIB_REAL_VOLTAGE  // 30.0В — вимкнення
 // ######################## END OF BATTERY ###############################
 
 
@@ -94,33 +131,56 @@
 #define MOTOR_LEFT_ENA
 #define MOTOR_RIGHT_ENA
 
-// FOC + VOLTAGE: плавна реакція, фрівіл при відпусканні газу
+// FOC + VOLTAGE MODE: найкращий варіант для зношеного акума —
+// контролер сам компенсує просідання напруги при навантаженні.
 #define CTRL_TYP_SEL    FOC_CTRL
 #define CTRL_MOD_REQ    VLT_MODE
 #define DIAG_ENA        1
 
-// Обмеження струму та швидкості
-#define I_MOT_MAX       15
-#define I_DC_MAX        17
+// =========================================================================
+// СТРУМ ТА ШВИДКІСТЬ — збільшено для зношеного акума (39В)
+// =========================================================================
+// Проблема: при 39В замість 42В мотори отримують на ~7% менше напруги.
+// Щоб компенсувати — збільшуємо ліміт струму (I_MOT_MAX) і знімаємо
+// обмеження поля (FIELD_WEAK), що дає більший крутний момент на старті.
+//
+// I_MOT_MAX  = 20А  (було 15А) — більше тяги на старті і підйомах
+// I_DC_MAX   = 22А  (було 17А) — відповідно збільшено DC ліміт
+// N_MOT_MAX  = 1000 — максимальна швидкість без змін
+//
+// УВАГА: якщо мотори або контролер сильно гріються — знизити I_MOT_MAX
+// назад до 17-18А.
+// =========================================================================
+#define I_MOT_MAX       20        // А, збільшено з 15 -> більше тяги
+#define I_DC_MAX        22        // А, збільшено з 17
 #define N_MOT_MAX       1000
 
-#define FIELD_WEAK_ENA  0
-#define FIELD_WEAK_MAX  5
+// =========================================================================
+// FIELD WEAKENING — увімкнено для кращого старту на зношеному акумі
+// =========================================================================
+// При низькій напрузі акума FOC-контролер швидше виходить на межу напруги.
+// Field weakening дозволяє підтримувати момент навіть коли напруга просідає.
+// FIELD_WEAK_MAX = 3 (обережно, не перегріти)
+// =========================================================================
+#define FIELD_WEAK_ENA  1         // увімкнено (було 0)
+#define FIELD_WEAK_MAX  3         // обережно з зношеним акумом (було 5)
 #define PHASE_ADV_MAX   25
-#define FIELD_WEAK_HI   1000
-#define FIELD_WEAK_LO   750
+#define FIELD_WEAK_HI   900       // трохи знижено (було 1000) під 39В акум
+#define FIELD_WEAK_LO   650       // трохи знижено (було 750) під 39В акум
 
 // Утримання на місці при зупинці
 #define STANDSTILL_HOLD_ENABLE
 
-// Електрогальмо при обриві сигналу газу:
-// При відпусканні педалі або обриві дроту ADC Protection обнулить команду,
-// і ELECTRIC_BRAKE виконає швидку але плавну зупинку.
-// MAX=300 -> досить сильне гальмо (швидка зупинка)
-// THRES=50 -> гальмо вмикається майже відразу після відпускання
+// =========================================================================
+// ЕЛЕКТРОГАЛЬМО
+// =========================================================================
+// MAX=200 (було 300) — трохи слабше гальмо, бо при зношеному акумі
+// рекуперація може перезаряджати і без того нестабільний акум.
+// THRES=50 — без змін.
+// =========================================================================
 #define ELECTRIC_BRAKE_ENABLE
-#define ELECTRIC_BRAKE_MAX    300       // (0-500) сила гальмування
-#define ELECTRIC_BRAKE_THRES   50       // (0-500) поріг вмикання гальма
+#define ELECTRIC_BRAKE_MAX    200       // знижено з 300 (захист акума)
+#define ELECTRIC_BRAKE_THRES   50
 // ########################### END OF MOTOR CONTROL ############################
 
 
@@ -129,24 +189,31 @@
 
 #define BEEPS_BACKWARD            1
 
-// ADC Protection: швидка реакція на обрив дроту газу
+// ADC Protection
 #define ADC_MARGIN                100
-#define ADC_PROTECT_TIMEOUT       30    // ~150мс до спрацювання (30 * 5мс)
+#define ADC_PROTECT_TIMEOUT       30
 #define ADC_PROTECT_THRESH        200
 
 #define AUTO_CALIBRATION_ENA
 
-// RATE = швидкість зміни команди (плавність розгону)
-// 80 = дуже плавний розгін (~5 сек від 0 до макс.)
-// Стандарт 480 = різкий розгін
-#define DEFAULT_RATE              80    // плавний розгін
+// =========================================================================
+// RATE — швидкість зміни команди (плавність розгону)
+// =========================================================================
+// Для зношеного акума ВАЖЛИВО мати плавний старт — різкий розгін дає
+// великий кидок струму, що просаджує напругу і може вимкнути контролер.
+//
+// 120 = плавний розгін (~3 сек від 0 до макс.) — компроміс між
+//       динамікою і захистом акума від просідання напруги.
+// Якщо хочеш ще плавніше — збільш до 160-200.
+// Якщо хочеш динамічніше — зменш до 80 (але акум буде просідати).
+// =========================================================================
+#define DEFAULT_RATE              120   // плавний старт для зношеного акума
 
 // FILTER = згладжування вхідного сигналу
-// 3276 = дуже м'який фільтр
 #define DEFAULT_FILTER            3276
 
 #define DEFAULT_SPEED_COEFFICIENT 16384
-#define DEFAULT_STEER_COEFFICIENT 0     // без рульового
+#define DEFAULT_STEER_COEFFICIENT 0
 // ######################### END OF DEFAULT SETTINGS ############################
 
 
@@ -162,8 +229,6 @@
 //   RX адаптера -> TX плати (PB10 правого роз'єму)
 //   115200 baud, 8N1
 // УВАГА: DEBUG_SERIAL_USART3 і SUPPORT_BUTTONS_RIGHT — взаємовиключні!
-//   Для debug — розкоментуй DEBUG_SERIAL_USART3 і закоментуй SUPPORT_BUTTONS_RIGHT у VARIANT_ADC
-//   Для тумблера реверсу — навпаки
 // ########################### END OF DEBUG SERIAL ############################
 
 
@@ -188,46 +253,39 @@
  * ТУМБЛЕР РЕВЕРСУ (правий роз'єм):
  * ============================================================
  *  GND        -> один контакт тумблера
- *  BUTTON_PIN -> другий контакт тумблера
+ *  PB11 (RX)  -> другий контакт тумблера
  *  Розімкнений = ВПЕРЕД, Замкнений на GND = НАЗАД
  *
- *  ВАЖЛИВО: SUPPORT_BUTTONS_RIGHT і DEBUG_SERIAL_USART3 — взаємовиключні!
- *  Для тумблера — залиш SUPPORT_BUTTONS_RIGHT (нижче).
- *  Для debug виводу — закоментуй SUPPORT_BUTTONS_RIGHT і розкоментуй DEBUG_SERIAL_USART3.
- * ============================================================
- *
- * ============================================================
- * ВИПРАВЛЕННЯ НАПРЯМУ ОБЕРТАННЯ:
- * ============================================================
- *  INVERT_R_DIRECTION нижче інвертує правий мотор.
- *  Якщо після цього обидва колеса крутяться вперед — готово.
- *  Якщо ні — спробуй замість нього INVERT_L_DIRECTION.
+ *  SUPPORT_BUTTONS_RIGHT — ВИМКНЕНО (тумблер керується напряму з main.c)
+ *  Це дозволяє одночасно мати і тумблер реверсу, і DEBUG на PB10 (TX).
  * ============================================================
  */
 
-  // ВИПРАВЛЕННЯ: інвертуємо правий мотор щоб обидва крутились в одну сторону
-  #define INVERT_R_DIRECTION
+  // Напрямок моторів керується через DIR_LEFT / DIR_RIGHT в main.c
+  // #define INVERT_R_DIRECTION  -- НЕ використовувати, може конфліктувати
 
-  #define CONTROL_ADC           0         // ADC = основний вхід
+  #define CONTROL_ADC           0
 
-  #define FLASH_WRITE_KEY       0x1012    // нове значення -> скидає стару калібровку з flash
+  #define FLASH_WRITE_KEY       0x1013    // збільшено -> скидає стару калібровку flash
 
-  // INPUT1 (PA2/ADC1) — ВИМКНЕНО (гальмо прибрано)
-  // INPUT2 (PA3/ADC2) — ГАЗ: Normal Pot 0..4095, deadband 100
-  //   MIN=50   -> ADC Protection спрацює при обриві (PA3 падає до 0) -> зупинка
-  //   MAX=3900 -> трохи нижче максимуму для надійності
+  // INPUT1 (PA2/ADC1) — ВИМКНЕНО
+  // INPUT2 (PA3/ADC2) — ГАЗ
+  //   MIN=50   -> ADC Protection спрацює при обриві
+  //   MAX=3900 -> трохи нижче максимуму
   //   DEADBAND=100 -> авто стоїть поки педаль не натиснута
   #define PRI_INPUT1            0,    0, 0,    0,   0   // ВИМКНЕНО
-  #define PRI_INPUT2            1,   50, 0, 3900, 100   // ГАЗ: Normal Pot 0..3.3V
+  #define PRI_INPUT2            1,   50, 0, 3900, 100   // ГАЗ: Normal Pot
 
-  // Обидва мотори отримують однакову команду (синхронний рух, без рульового)
+  // Обидва мотори — однакова команда (без рульового)
   #define TANK_STEERING
 
-  // Тумблер реверсу на правому роз'ємі (BUTTON_PIN)
-  // Закоментуй якщо хочеш використовувати DEBUG_SERIAL_USART3 замість тумблера
-  #define SUPPORT_BUTTONS_RIGHT
+  // SUPPORT_BUTTONS_RIGHT — ВИМКНЕНО!
+  // Тумблер реверсу підключений до PB11 і керується напряму з main.c.
+  // Якщо розкоментувати — HAL перепише налаштування PB11 і тумблер не працюватиме.
+  // #define SUPPORT_BUTTONS_RIGHT
 
-  // Debug UART на правому роз'ємі — увімкни ТІЛЬКИ якщо SUPPORT_BUTTONS_RIGHT закоментовано!
+  // Debug UART (PB10/TX правого роз'єму) — можна увімкнути одночасно з тумблером!
+  // Розкоментуй для калібрування батареї та перевірки реверсу:
   // #define DEBUG_SERIAL_USART3
 
 #endif
@@ -501,7 +559,6 @@
     !defined(VARIANT_IBUS) && !defined(VARIANT_HOVERCAR) && !defined(VARIANT_HOVERBOARD) && !defined(VARIANT_TRANSPOTTER) && !defined(VARIANT_SKATEBOARD)
   #error Variant not defined! Please check platformio.ini or Inc/config.h for available variants.
 #endif
-
 #if defined(CONTROL_SERIAL_USART2) && defined(SIDEBOARD_SERIAL_USART2)
   #error CONTROL_SERIAL_USART2 and SIDEBOARD_SERIAL_USART2 not allowed, choose one.
 #endif
@@ -526,7 +583,6 @@
 #if defined(SUPPORT_BUTTONS_LEFT) && defined(SUPPORT_BUTTONS_RIGHT)
   #error SUPPORT_BUTTONS_LEFT and SUPPORT_BUTTONS_RIGHT not allowed, choose one.
 #endif
-
 #if defined(CONTROL_ADC) && (defined(CONTROL_SERIAL_USART2) || defined(SIDEBOARD_SERIAL_USART2) || defined(FEEDBACK_SERIAL_USART2) || defined(DEBUG_SERIAL_USART2))
   #error CONTROL_ADC and SERIAL_USART2 not allowed. It is on the same cable.
 #endif
@@ -548,7 +604,6 @@
 #if defined(CONTROL_PPM_LEFT) && defined(CONTROL_PWM_LEFT)
   #error CONTROL_PPM_LEFT and CONTROL_PWM_LEFT not allowed. It is on the same cable.
 #endif
-
 #if defined(CONTROL_NUNCHUK) && (defined(CONTROL_SERIAL_USART3) || defined(SIDEBOARD_SERIAL_USART3) || defined(FEEDBACK_SERIAL_USART3) || defined(DEBUG_SERIAL_USART3))
   #error CONTROL_NUNCHUK and SERIAL_USART3 not allowed. It is on the same cable.
 #endif
@@ -576,7 +631,6 @@
 #if defined(CONTROL_PPM_RIGHT) && defined(CONTROL_PWM_RIGHT)
   #error CONTROL_PPM_RIGHT and CONTROL_PWM_RIGHT not allowed. It is on the same cable.
 #endif
-
 #if (defined(CONTROL_PPM_LEFT) || defined(CONTROL_PPM_RIGHT)) && !defined(PPM_NUM_CHANNELS)
   #error Total number of PPM channels needs to be set
 #endif
